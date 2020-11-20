@@ -11,31 +11,32 @@ import (
 	"time"
 )
 
-type collatzCalculator struct {
-	mask        uint64
-	maskPower   uint64
-	maskIsSolid bool
+/*
 
-	Printer chan string
-	results chan uint64
+This program was written by Alyx Green in November 2020
+Written for Evan Goff's Paper on the Collatz Conjecture
+Designed to be Self-Documenting, but an example of use:
+func main() {
+	c := Collatz.NewCollatzCalculator()
+	c.BenchmarkSequential(24)
+}
+Definitely not the most efficient possible way, but far
+superior to his Python implementation. Cut >13m Python
+implementation to ~5ms here on same numbers and PC.
+
+*/
+
+type collatzCalculator struct {
+	PrintResults bool
+	Printer      chan string
 }
 
 func NewCollatzCalculator() *collatzCalculator {
 	c := collatzCalculator{}
-	c.Reset()
-
+	c.PrintResults = true
 	c.Printer = make(chan string)
-	c.results = make(chan uint64)
-	go c.ResultsWatcher()
 	go c.PrinterWatcher()
-	c.results <- 2
 	return &c
-}
-
-func (c collatzCalculator) Reset() {
-	c.mask = 2
-	c.maskPower = 2
-	c.maskIsSolid = false
 }
 
 func (c collatzCalculator) BenchmarkSequential(toPower uint64) {
@@ -59,71 +60,35 @@ func (c collatzCalculator) BenchmarkConcurrent(toPower uint64) {
 	fmt.Printf("Concurrently Calculated Collatz to %s (2^%d) in %s\n\n", max, toPower, done)
 }
 
-func (c collatzCalculator) ResultsWatcher() {
-	if c.maskPower == 0 {
-		c.maskPower = 2
-	}
-	msg := uint64(1)
-	for msg != 0 {
-		msg = <-c.results
-		c.mask = c.mask | msg
-		for c.maskPower < msg-1 {
-			c.maskPower = c.maskPower << 1
-		}
-		if c.mask+2 == c.maskPower<<1 {
-			c.maskIsSolid = true
-		}
-		// fmt.Printf("Finished: %d\n",msg)
-		// fmt.Printf("Mask:  %s (%d)\n", strconv.FormatUint(c.mask, 2), c.mask)
-		// fmt.Printf("Power: %s (%d)\n", strconv.FormatUint(c.maskPower, 2), c.maskPower)
-	}
-}
-
-func (c collatzCalculator) PrinterWatcher() {
-	f, _ := os.Create("c://dat.txt")
+func (c collatzCalculator) PrinterWatcher() { // things to write to file
+	f, _ := os.Create("c://dat.txt") // replace as needed
 	defer f.Close()
-	msg := "a"
+	msg := "a" // initialise
 	w := bufio.NewWriter(f)
 	for msg != "stop" {
 		msg = <-c.Printer
 		_, _ = w.WriteString(msg)
-		// _ = w.Flush()
+		_ = w.Flush()
 	}
 	_ = w.Flush()
 }
 
-func (c collatzCalculator) hasProven(n uint64) bool {
-	if n > c.mask {
-		return false
-	}
-	if c.maskIsSolid && n < c.mask {
-		return true
-	}
-	x := c.maskPower
-	for x > 1 {
-		if (x&c.mask)&n != 0 {
-			return true
-		}
-		x = x >> 1
-	}
-	return false
-}
-
-func (c collatzCalculator) TestSequentially(toPower uint64) {
+func (c collatzCalculator) TestSequentially(toPower uint64) { // no concurrency
 	for i := uint64(2); i < toPower; i++ {
-
+		// splits by power of 2 (remnant of old method of checking progress)
 		start := (uint64(2) << (i - 2)) + 1
 		stop := uint64(2) << (i - 1)
 		for ii := start; ii < stop; ii += 2 {
 			c.Test(ii)
 		}
-		c.results <- stop
 	}
 }
 
-func (c collatzCalculator) TestConcurrently(toPower uint64) bool {
+func (c collatzCalculator) TestConcurrently(toPower uint64) bool { // with concurrency
 	var wg sync.WaitGroup
 	for i := uint64(2); i < toPower; i++ {
+		// splits by power of 2 (remnant of old method of checking progress)
+		// Can change, but likely won't affect performance
 		wg.Add(1)
 		start := (uint64(2) << (i - 2)) + 1
 		stop := uint64(2) << (i - 1)
@@ -134,8 +99,11 @@ func (c collatzCalculator) TestConcurrently(toPower uint64) bool {
 }
 
 func (c collatzCalculator) chunkSplitter(start uint64, stop uint64, wg *sync.WaitGroup) {
-	start = start | 1
+	// break into chunks because the above func does by power of 2
+	start = start | 1 // start at odd number
 	difference := stop - start
+	// min size is 10000 (arbitrary);
+	// difference/14 is optimal (for my PC's Ryzen 3900x)
 	maxChunkSize := uint64(math.Max(float64(difference/14), float64(10000)))
 	cursor := start
 	var wg2 sync.WaitGroup
@@ -150,10 +118,11 @@ func (c collatzCalculator) chunkSplitter(start uint64, stop uint64, wg *sync.Wai
 	}
 	wg2.Wait()
 	wg.Done()
-	c.results <- stop
 }
 
 func (c collatzCalculator) calculateChunk(start uint64, stop uint64, wg *sync.WaitGroup) {
+	// loop through and actually do the work
+	// += 2 because odd numbers only
 	for i := start; i < stop; i += 2 {
 		c.Test(i)
 	}
@@ -161,7 +130,16 @@ func (c collatzCalculator) calculateChunk(start uint64, stop uint64, wg *sync.Wa
 }
 
 func (c collatzCalculator) Test(number uint64) {
-	// start:=number
+	start := number
+	// skip all numbers below starting N because run in a loop, this program
+	// will test all numbers sequentially, making testing below N redundant
+	// and run individually, TestAndPrint will go through all the steps
+	for number > start {
+		number = c.GetNextCollatzNumber(number)
+	}
+}
+
+func (c collatzCalculator) TestAndPrint(number uint64) {
 	c.Printer <- fmt.Sprintf("%d", number)
 	for number > 1 {
 		number = c.GetNextCollatzNumber(number)
@@ -171,6 +149,7 @@ func (c collatzCalculator) Test(number uint64) {
 }
 
 func (c collatzCalculator) GetSteps(number uint64) (steps uint64) {
+	// count steps to get to 1
 	steps = 0
 	for number > 1 {
 		steps++
@@ -180,8 +159,12 @@ func (c collatzCalculator) GetSteps(number uint64) (steps uint64) {
 }
 
 func (c collatzCalculator) GetNextCollatzNumber(number uint64) uint64 {
+	// bitshifting for performance (results may vary)
 	if number%2 == 0 {
-		return number >> 1
+		return number >> 1 // == x2
 	}
+	// (3n-1)/(2) == (4n-n-1)/(2) == (2n)-((n-1)/2)
+	// Bitshift << 1 == x2, bitshift >> 1 == halve
+	// bitshifting drops the one's place, so you get this:
 	return (number << 1) - (number >> 1)
 }
