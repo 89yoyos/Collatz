@@ -22,7 +22,7 @@ func main() {
 }
 Definitely not the most efficient possible way, but far
 superior to his Python implementation. Cut >13m Python
-implementation to ~5ms here on same numbers and PC.
+implementation to ~7ms here on same numbers and PC.
 
 */
 
