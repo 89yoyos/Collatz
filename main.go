@@ -107,7 +107,7 @@ func (c collatzCalculator) chunkSplitter(start uint64, stop uint64, wg *sync.Wai
 	maxChunkSize := uint64(math.Max(float64(difference/14), float64(10000)))
 	cursor := start
 	var wg2 sync.WaitGroup
-	for cursor < stop {
+	for cursor < stop { // work through assigned numbers and assign them to threads
 		wg2.Add(1)
 		cut := cursor + maxChunkSize - 1
 		if cursor+maxChunkSize > stop {
@@ -139,12 +139,16 @@ func (c collatzCalculator) Test(number uint64) {
 	}
 }
 
-func (c collatzCalculator) TestAndPrint(number uint64) {
+func (c collatzCalculator) TestAndPrint(number uint64) { // print whole path to 1
+	// NOT guaranteed to print in order (almost certainly won't)
+	// print "N" to file
 	c.Printer <- fmt.Sprintf("%d", number)
 	for number > 1 {
+		// print next number ",N" to file
 		number = c.GetNextCollatzNumber(number)
 		c.Printer <- fmt.Sprintf(",%d", number)
 	}
+	// print line break before moving on
 	c.Printer <- fmt.Sprintf(",\n")
 }
 
@@ -163,8 +167,11 @@ func (c collatzCalculator) GetNextCollatzNumber(number uint64) uint64 {
 	if number%2 == 0 {
 		return number >> 1 // == x2
 	}
-	// (3n-1)/(2) == (4n-n-1)/(2) == (2n)-((n-1)/2)
-	// Bitshift << 1 == x2, bitshift >> 1 == halve
-	// bitshifting drops the one's place, so you get this:
+	// (3n-1)/(2) == (4n-n-1)/(2) == ((4n)-(n-1))/(2) == (2n)-((n-1)/2)
+	// These numbers are always odd, so the one's position is always == 1
+	// bitshifting drops the one's place, making subtracting 1 unnecessary
+	// leaving us with: (2n)-(n/2)
+	// Bitshifting left == x2, bitshifting right == /2
+	// therefore:
 	return (number << 1) - (number >> 1)
 }
